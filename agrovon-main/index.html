@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AgriSmart</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+      :root {
+        --bg-main: #F9FAFB;
+        --bg-card: #FFFFFF;
+        --bg-input: #F3F4F6;
+        --border-color: #E5E7EB;
+        --text-main: #111827;
+        --text-secondary: #6B7280;
+        --text-accent: #3CB371;
+        --primary: #3CB371;
+        --primary-bg: #ECFDF5;
+        --shadow-color: rgba(0, 0, 0, 0.05);
+      }
+
+      .dark {
+        --bg-main: #0E1F1A;
+        --bg-card: #16352D;
+        --bg-input: #132822;
+        --border-color: #1F4D3A;
+        --text-main: #EAF5EF;
+        --text-secondary: #B7D1C4;
+        --text-accent: #3CB371;
+        --primary: #3CB371;
+        --primary-bg: #1F4D3A;
+        --shadow-color: rgba(0, 0, 0, 0.3);
+      }
+
+      body {
+        font-family: 'Inter', sans-serif;
+        background-color: var(--bg-main);
+        color: var(--text-main);
+        transition: background-color 0.3s, color 0.3s;
+      }
+      /* Hide scrollbar for Chrome, Safari and Opera */
+      .no-scrollbar::-webkit-scrollbar {
+          display: none;
+      }
+      /* Hide scrollbar for IE, Edge and Firefox */
+      .no-scrollbar {
+          -ms-overflow-style: none;  /* IE and Edge */
+          scrollbar-width: none;  /* Firefox */
+      }
+    </style>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              custom: {
+                bg: 'var(--bg-main)',
+                card: 'var(--bg-card)',
+                input: 'var(--bg-input)',
+                border: 'var(--border-color)',
+                text: 'var(--text-main)',
+                subtext: 'var(--text-secondary)',
+                primary: 'var(--primary)',
+                primaryBg: 'var(--primary-bg)'
+              }
+            }
+          }
+        }
+      }
+    </script>
+  <script type="importmap">
+{
+  "imports": {
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.38.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "name": "Agro Von",
+  "description": "An intelligent agriculture management app featuring weather tracking, crop management, and AI-powered farming advice.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera",
+    "geolocation"
+  ]
+}
