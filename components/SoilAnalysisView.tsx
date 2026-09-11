@@ -22,33 +22,6 @@ interface SoilAnalysisViewProps {
   language?:    string;
 }
 
-interface SensorTelemetry {
-  soilTemp:    number | null;
-  moisture:    number | null;
-  ambientTemp: number | null;
-  humidity:    number | null;
-  disasterRisk: string;
-  pumpStatus: string;
-}
-
-interface PredictionResult {
-  rawString:  string;
-  classId:    string;
-  className:  string;
-  confidence: number;
-  isHealthy:  boolean;
-  timestamp:  string;
-}
-
-const parsePredictionString = (raw: string): PredictionResult => {
-  const confMatch  = raw.match(/\((\d+\.?\d*)%\)/);
-  const confidence = confMatch ? parseFloat(confMatch[1]) : 0;
-  const classMatch = raw.match(/[Cc]lass\s*(\d+)/);
-  const classId    = classMatch ? classMatch[1] : '�';
-  const className  = classMatch ? `Class ${classId}` : raw.replace(/\(.*\)/, '').trim();
-  return { rawString: raw, classId, className, confidence, isHealthy: raw.toLowerCase().includes('healthy'), timestamp: new Date().toLocaleTimeString() };
-};
-
 const getStatus = (v: number | null, low: number, high: number) => {
   if (v === null) return { label: 'NO DATA', color: 'text-gray-500', bg: 'bg-gray-500/15 border-gray-500/25' };
   if (v < low)   return { label: 'LOW',     color: 'text-red-400',   bg: 'bg-red-500/15 border-red-500/25' };
@@ -62,18 +35,14 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
   const [analysis,  setAnalysis]  = useState<SoilAnalysis | null>(null);
   const [aiLoading, setAiLoading] = useState(true);
   const [aiError,   setAiError]   = useState<string | null>(null);
-  const [sensors,   setSensors]   = useState<SensorTelemetry>({ soilTemp: null, moisture: null, ambientTemp: null, humidity: null, disasterRisk: 'Safe', pumpStatus: 'OFF' });
+  const [farmData, setFarmData] = useState<any>({ 
+    status: "Safe",
+    temperature: 0,
+    moisture: 0,
+    rain_val: "No Rain"
+  });
   const [hwOnline,  setHwOnline]  = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
-  const [sensorError, setSensorError] = useState<string | null>(null);
-  const [previewUrl,  setPreviewUrl]  = useState<string | null>(null);
-  const [scanning,    setScanning]    = useState(false);
-  const [prediction,  setPrediction]  = useState<PredictionResult | null>(null);
-  const [scanError,   setScanError]   = useState<string | null>(null);
-  const [scanY,       setScanY]       = useState(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const scanFrame    = useRef<number | null>(null);
-  const PREVIEW_H    = 200;
 
   const defaultSoilData: SoilData = soilData || { N: 45, P: 32, K: 180, moisture: 24, temp: 27, pH: 6.8, organicMatter: 2.1 };
 
@@ -98,61 +67,23 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
   }, [soilData, userProfile, language]);
 
   useEffect(() => { performAnalysis(); }, [soilData]);
-
   const fetchSensors = useCallback(async () => {
     try {
-      const res = await fetch(`${PI_URL}/sensors`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5000) });
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), 2000);
+      const res = await fetch(`${PI_URL}/api/farm-status`, { signal: controller.signal });
+      clearTimeout(id);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
-      setSensors({ 
-        soilTemp: parseFloat(d.soilTemp) ?? null, 
-        moisture: parseFloat(d.moisture) ?? null, 
-        ambientTemp: parseFloat(d.ambientTemp) ?? null, 
-        humidity: parseFloat(d.humidity) ?? null,
-        disasterRisk: 'Safe', // Mock placeholder
-        pumpStatus: 'OFF'     // Mock placeholder
-      });
-      setHwOnline(true); setSensorError(null); setLastUpdated(new Date().toLocaleTimeString());
-    } catch (err: any) { setHwOnline(false); setSensorError(`Agro-Bozo offline � ${err.message}`); }
+      setFarmData(d);
+      setHwOnline(true);
+      setLastUpdated(new Date().toLocaleTimeString());
+    } catch (err: any) {
+      setHwOnline(false);
+    }
   }, []);
 
   useEffect(() => { fetchSensors(); const id = setInterval(fetchSensors, POLL_MS); return () => clearInterval(id); }, [fetchSensors]);
-
-  const startScanAnim = () => { let y = 0; const tick = () => { y = (y + 2.5) % PREVIEW_H; setScanY(y); scanFrame.current = requestAnimationFrame(tick); }; scanFrame.current = requestAnimationFrame(tick); };
-  const stopScanAnim  = () => { if (scanFrame.current) cancelAnimationFrame(scanFrame.current); setScanY(0); };
-
-  const runScan = async (blob: Blob, localUrl: string) => {
-    setPreviewUrl(localUrl); setPrediction(null); setScanError(null); setScanning(true); startScanAnim();
-    try {
-      const form = new FormData(); form.append('image', blob, 'leaf_scan.jpg');
-      const res  = await fetch(`${PI_URL}/upload`, { method: 'POST', body: form, signal: AbortSignal.timeout(30000) });
-      if (!res.ok) throw new Error(`Pi server HTTP ${res.status}`);
-      const ct = res.headers.get('content-type') || '';
-      let raw: string;
-      if (ct.includes('application/json')) {
-        const j = await res.json();
-        raw = j.result ?? j.prediction ?? (j.className ? `${j.className} (${(j.confidence * 100).toFixed(2)}%)` : JSON.stringify(j));
-      } else { raw = await res.text(); }
-      setPrediction(parsePredictionString(raw.trim()));
-    } catch (err: any) { setScanError(err.message || 'Could not reach Raspberry Pi server.'); }
-    finally { stopScanAnim(); setScanning(false); }
-  };
-
-  const handleESP32Scan = async () => {
-    if (scanning) return;
-    setPreviewUrl(null); setScanError(null); setPrediction(null); setScanning(true); startScanAnim();
-    try {
-      const imgRes = await fetch(`${ESP32_URL}/capture`, { signal: AbortSignal.timeout(12000) });
-      if (!imgRes.ok) throw new Error(`ESP32-CAM HTTP ${imgRes.status}`);
-      const blob = await imgRes.blob(); const url = URL.createObjectURL(blob);
-      stopScanAnim(); await runScan(blob, url);
-    } catch (err: any) { stopScanAnim(); setScanning(false); setScanError(`ESP32-CAM unreachable � ${err.message}`); }
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    await runScan(file, URL.createObjectURL(file)); e.target.value = '';
-  };
 
   if (aiLoading) return (
     <div className={`flex flex-col min-h-screen ${T.bg} ${T.text} animate-fade-in pb-24`}>
@@ -183,34 +114,13 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
         <button onClick={performAnalysis} className="px-5 py-2 bg-green-600 text-white rounded-xl text-sm font-bold">Retry</button>
       </div>
     </div>
-  );
+  );  const [camTime, setCamTime] = useState(Date.now());
 
-  if (!analysis) return null;
-
-  const SensorCard = ({ v, low, high, max, icon, label, sub, unit, chipColor }: any) => {
-    const s = getStatus(v, low, high);
-    return (
-      <div className={`flex items-center gap-4 p-4 ${T.innerCard} rounded-2xl border border-[#2d4a3e]`}>
-        <div className={`w-12 h-12 rounded-xl ${chipColor} flex flex-col items-center justify-center gap-0.5 flex-shrink-0`}>
-          {icon}
-          <span className="text-[8px] text-white/40 font-bold">{sub}</span>
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between mb-1.5">
-            <p className="text-xs font-semibold text-white/90">{label}</p>
-            <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border ${s.bg} ${s.color}`}>{s.label}</span>
-          </div>
-          <div className="flex items-end gap-1.5 mb-2">
-            <span className={`text-4xl font-black leading-none ${s.color}`}>{v !== null ? v.toFixed(1) : '�'}</span>
-            <span className="text-sm text-gray-500 mb-1">{unit}</span>
-          </div>
-          <div className="h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
-            <div className="h-full rounded-full transition-all duration-1000" style={{ width: fillPct(v, max), backgroundColor: barClr(v, low, high) }} />
-          </div>
-        </div>
-      </div>
-    );
-  };
+  // Refresh Camera Feed
+  useEffect(() => {
+    const camInterval = setInterval(() => setCamTime(Date.now()), 1500); // 1.5s refresh for ESP32 capture
+    return () => clearInterval(camInterval);
+  }, []);
 
   return (
     <div className={`flex flex-col min-h-screen ${T.bg} ${T.text} animate-fade-in pb-24`}>
@@ -221,172 +131,61 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
           <h1 className="text-lg font-extrabold tracking-tight">Soil & Crop Health</h1>
           <div className="flex items-center gap-1.5 mt-0.5">
             <div className={`w-1.5 h-1.5 rounded-full ${hwOnline ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
-            <span className={`text-[10px] font-bold tracking-wide ${hwOnline ? 'text-green-400' : 'text-gray-500'}`}>{hwOnline ? `AGRO-BOZO LIVE � ${lastUpdated}` : 'HARDWARE OFFLINE'}</span>
+            <span className={`text-[10px] font-bold tracking-wide ${hwOnline ? 'text-green-400' : 'text-gray-500'}`}>{hwOnline ? `AGRO-BOZO LIVE • ${lastUpdated}` : 'HARDWARE OFFLINE'}</span>
           </div>
         </div>
         <button onClick={() => { performAnalysis(); fetchSensors(); }} className={`p-2 ${T.btnBg} rounded-full`}><RefreshCw className="w-4 h-4" /></button>
       </div>
 
       <div className="p-4 space-y-5">
-
-        {/* SECTION 1 � SENSOR TELEMETRY */}
-        <div className={`${T.cardBg} rounded-3xl p-5 ${T.cardBorder} border shadow-xl`}>
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-green-500/20 flex items-center justify-center"><Activity className="w-4 h-4 text-green-400" /></div>
-              <div>
-                <h2 className="font-bold text-sm">Live Sensor Telemetry</h2>
-                <p className="text-[10px] text-gray-500">Agro-Bozo Node � polling every {POLL_MS / 1000}s</p>
-                <p className="text-[10px] text-gray-500">Agro-Bozo Node  polling every {POLL_MS / 1000}s</p>
-              </div>
-            </div>
-            {!hwOnline && <div className="flex items-center gap-1 text-[10px] text-gray-500 bg-gray-500/10 px-2 py-1 rounded-full border border-gray-500/20"><WifiOff className="w-3 h-3" /><span>Offline</span></div>}
+        {/* 🔴 LIVE AI VIDEO STREAM */}
+        <div className="w-full h-[260px] rounded-2xl overflow-hidden border-4 border-green-500 shadow-lg relative bg-black flex items-center justify-center">
+          <img 
+            src={`http://192.168.137.86/capture?t=${camTime}`} 
+            alt="ESP32 Live Stream"
+            className="w-full h-full object-cover"
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            onLoad={(e) => { e.currentTarget.style.display = 'block'; }}
+          />
+          <div className="absolute top-3 left-3 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-md animate-pulse flex items-center gap-1.5 shadow-md">
+            <div className="w-1.5 h-1.5 bg-white rounded-full"></div> ESP32 LIVE
           </div>
-          {sensorError && <div className="mb-3 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" /><p className="text-[11px] text-red-400">{sensorError}</p></div>}
-          <div className="space-y-3">
-            <SensorCard v={sensors.soilTemp}    low={15} high={32}  max={60}  icon={<Thermometer className="w-5 h-5 text-orange-400" />} label="Soil Temperature"   sub="DS18B20" unit="°C" chipColor="bg-orange-500/20" />
-            <SensorCard v={sensors.moisture}    low={30} high={70}  max={100} icon={<Droplets className="w-5 h-5 text-blue-400" />}     label="Soil Moisture"      sub="MOIST."  unit="%" chipColor="bg-blue-500/20" />
-            <SensorCard v={sensors.ambientTemp} low={15} high={35}  max={60}  icon={<Thermometer className="w-5 h-5 text-yellow-400" />} label="Ambient Temperature" sub="DHT"     unit="°C" chipColor="bg-yellow-500/20" />
-            <SensorCard v={sensors.humidity}    low={40} high={80}  max={100} icon={<Wind className="w-5 h-5 text-teal-400" />}         label="Air Humidity"       sub="DHT"     unit="%" chipColor="bg-teal-500/20" />
-            
-            {/* NEW CARDS - DISASTER & PUMP RELAY */}
-            <div className="grid grid-cols-2 gap-3 mt-4">
-              <div className={`p-4 ${T.innerCard} rounded-2xl border border-[#2d4a3e] relative overflow-hidden`}>
-                <div className="absolute top-0 right-0 p-3 opacity-10"><CloudRain className="w-10 h-10 text-indigo-400" /></div>
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-8 h-8 rounded-xl bg-indigo-500/20 flex items-center justify-center"><CloudRain className="w-4 h-4 text-indigo-400" /></div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Rain & Flood Monitor</span>
-                </div>
-                <div className="flex items-end justify-between mt-3">
-                  <span className={`text-xl font-black ${sensors.disasterRisk === 'Safe' ? 'text-green-400' : sensors.disasterRisk === 'Warning' ? 'text-yellow-400' : 'text-red-400'}`}>{sensors.disasterRisk}</span>
-                </div>
-              </div>
-              <div className={`p-4 ${T.innerCard} rounded-2xl border border-[#2d4a3e] relative overflow-hidden`}>
-                <div className="absolute top-0 right-0 p-3 opacity-10"><Plug className="w-10 h-10 text-cyan-400" /></div>
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="w-8 h-8 rounded-xl bg-cyan-500/20 flex items-center justify-center"><Plug className="w-4 h-4 text-cyan-400" /></div>
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Pump Status & Relay</span>
-                </div>
-                <div className="flex items-end justify-between mt-3">
-                  <span className={`text-xl font-black ${sensors.pumpStatus === 'ON' ? 'text-blue-400' : 'text-gray-500'}`}>{sensors.pumpStatus}</span>
-                  <button className={`px-3 py-1 rounded-full text-[10px] font-bold border ${sensors.pumpStatus === 'ON' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : 'bg-gray-500/20 text-gray-400 border-gray-500/30'}`}>TOGGLE</button>
-                </div>
-              </div>
+        </div>
+
+        {/* 🚨 DISASTER ALERT CARD */}
+        <div className={`p-4 rounded-xl shadow-sm border ${(farmData.status ?? farmData.disaster_alert) !== "Safe" ? 'bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/30' : 'bg-green-50 dark:bg-green-500/10 border-green-200 dark:border-green-500/30'}`}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Disaster Status</span>
+            <span className={`text-lg font-black ${(farmData.status ?? farmData.disaster_alert) !== "Safe" ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>{(farmData.status ?? farmData.disaster_alert) === "Safe" ? "✅ Safe" : "🚨 " + (farmData.status ?? farmData.disaster_alert)}</span>
+          </div>
+        </div>
+
+        {/* 📡 SENSOR ZONE DATA */}
+        <div className={`${T.cardBg} p-4 rounded-2xl ${T.cardBorder} border shadow-xl relative overflow-hidden group`}>
+          <div className="flex items-center gap-2 mb-4">
+            <div className="w-8 h-8 rounded-xl bg-green-500/20 flex items-center justify-center"><Cpu className="w-4 h-4 text-green-400" /></div>
+            <div>
+              <h2 className="font-bold text-sm">Zone 1 (Master Node)</h2>
+              <p className="text-[10px] text-gray-500">Live Telemetry  polling every 2s</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="bg-orange-50 dark:bg-orange-500/10 p-3 rounded-xl border border-orange-100 dark:border-orange-500/20">
+              <span className="block text-xs text-gray-500 uppercase font-bold mb-1">Temp</span>
+              <span className="text-2xl font-black text-orange-500">{farmData.temperature ?? farmData.temp ?? 0}°C</span>
+            </div>
+            <div className="bg-blue-50 dark:bg-blue-500/10 p-3 rounded-xl border border-blue-100 dark:border-blue-500/20">
+              <span className="block text-xs text-gray-500 uppercase font-bold mb-1">Moisture</span>
+              <span className="text-2xl font-black text-blue-500">{farmData.moisture ?? farmData.moist ?? 0}%</span>
+            </div>
+            <div className="bg-indigo-50 dark:bg-indigo-500/10 p-3 rounded-xl border border-indigo-100 dark:border-indigo-500/20">
+              <span className="block text-xs text-gray-500 uppercase font-bold mb-1">Rain</span>
+              <span className="text-sm font-black text-indigo-500 flex items-center justify-center h-full pb-1">{farmData.rain_val ?? farmData.rain ?? "No Rain"}</span>
             </div>
           </div>
         </div>
 
-        {/* SECTION 2  AI SCANNER */}
-        <div className={`${T.cardBg} rounded-3xl ${T.cardBorder} border shadow-xl overflow-hidden`}>
-          <div className="px-5 pt-5 pb-4 border-b border-[#2d4a3e]">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-green-500/20 flex items-center justify-center"><Zap className="w-5 h-5 text-green-400" /></div>
-                <div>
-                  <h2 className="font-extrabold text-base tracking-tight">Agro-Bozo AI Scanner</h2>
-                  <p className="text-[10px] text-gray-500">ESP32-CAM Vision Node � MobileNetV2 TFLite</p>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="flex items-center gap-1.5 justify-end"><Server className="w-3 h-3 text-green-500" /><span className="text-[9px] text-green-400 font-bold">PI 5 EDGE</span></div>
-                <p className="text-[9px] text-gray-600">172.16.32.64:5000</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Image preview */}
-          <div className="mx-4 mt-4 relative rounded-2xl overflow-hidden border border-[#2d4a3e] bg-[#0a1810]" style={{ height: PREVIEW_H }}>
-            {previewUrl
-              ? <img src={previewUrl} alt="Crop scan" className="w-full h-full object-cover" />
-              : <div className="w-full h-full flex flex-col items-center justify-center gap-3">
-                  <div className="w-16 h-16 rounded-2xl bg-green-500/10 border border-green-500/20 flex items-center justify-center"><Camera className="w-7 h-7 text-green-600" /></div>
-                  <div className="text-center px-8">
-                    <p className="text-sm font-semibold text-gray-400">ESP32-CAM Preview</p>
-                    <p className="text-[11px] text-gray-600 mt-1">{scanning ? 'Capturing frame from vision node�' : 'Tap "Scan Crop" to trigger the ESP32-CAM and run disease detection.'}</p>
-                  </div>
-                </div>
-            }
-            {scanning && (
-              <>
-                <div className="absolute inset-0 bg-black/35" />
-                <div className="absolute left-0 right-0 pointer-events-none" style={{ top: scanY, height: 2, background: 'linear-gradient(90deg,transparent,#22c55e 20%,#4ade80 50%,#22c55e 80%,transparent)', boxShadow: '0 0 14px 4px rgba(74,222,128,0.55)' }} />
-                {['top-3 left-3 border-t-2 border-l-2 rounded-tl','top-3 right-3 border-t-2 border-r-2 rounded-tr','bottom-3 left-3 border-b-2 border-l-2 rounded-bl','bottom-3 right-3 border-b-2 border-r-2 rounded-br'].map((c,i) => <div key={i} className={`absolute w-5 h-5 border-green-400 ${c}`} />)}
-                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3.5 py-1.5 bg-black/75 rounded-full border border-green-500/40 backdrop-blur-sm">
-                  <div className="flex gap-0.5">{[0,1,2].map(i => <div key={i} className="w-1 h-1 rounded-full bg-green-400 animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />)}</div>
-                  <span className="text-[11px] font-bold text-green-300">{previewUrl ? 'Running Inference � MobileNetV2' : 'Fetching Frame � ESP32-CAM'}</span>
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Prediction result */}
-          {prediction && !scanning && (
-            <div className={`mx-4 mt-3 p-5 rounded-2xl border ${prediction.isHealthy ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'}`}>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2"><Cpu className="w-4 h-4 text-gray-500" /><span className="text-[10px] font-black uppercase tracking-widest text-gray-400">AI Inference Result</span></div>
-                <span className="text-[9px] text-gray-600">{prediction.timestamp}</span>
-              </div>
-
-              {/* Raw result string � prominent display */}
-              <div className={`px-4 py-3 rounded-xl mb-4 ${prediction.isHealthy ? 'bg-green-500/15' : 'bg-red-500/15'}`}>
-                <p className={`text-base font-black leading-tight ${prediction.isHealthy ? 'text-green-300' : 'text-red-300'}`}>{prediction.rawString}</p>
-                <p className="text-[10px] text-gray-500 mt-1">Raw output � Raspberry Pi 5 Flask Server</p>
-              </div>
-
-              {/* Parsed class + confidence */}
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <div className="bg-black/30 rounded-xl p-3">
-                  <p className="text-[9px] text-gray-500 uppercase tracking-wider mb-1">Class ID</p>
-                  <p className={`text-3xl font-black ${prediction.isHealthy ? 'text-green-400' : 'text-red-400'}`}>{prediction.classId}</p>
-                  <p className="text-[9px] text-gray-600">{prediction.className}</p>
-                </div>
-                <div className="bg-black/30 rounded-xl p-3">
-                  <p className="text-[9px] text-gray-500 uppercase tracking-wider mb-1">Confidence</p>
-                  <p className={`text-3xl font-black ${prediction.isHealthy ? 'text-green-400' : 'text-red-400'}`}>{prediction.confidence.toFixed(2)}%</p>
-                  <p className="text-[9px] text-gray-600">Model certainty</p>
-                </div>
-              </div>
-
-              {/* Confidence bar */}
-              <div className="mb-3">
-                <div className="h-3 bg-gray-700/50 rounded-full overflow-hidden">
-                  <div className="h-full rounded-full transition-all duration-1000" style={{ width: `${prediction.confidence}%`, backgroundColor: prediction.isHealthy ? '#22c55e' : '#ef4444', boxShadow: `0 0 8px ${prediction.isHealthy ? '#22c55e88' : '#ef444488'}` }} />
-                </div>
-              </div>
-
-              {/* Status badge */}
-              <div className={`flex items-center gap-2 px-3 py-2.5 rounded-xl ${prediction.isHealthy ? 'bg-green-500/10 border border-green-500/25' : 'bg-red-500/10 border border-red-500/25'}`}>
-                {prediction.isHealthy ? <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0" /> : <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />}
-                <p className={`text-xs font-semibold ${prediction.isHealthy ? 'text-green-300' : 'text-red-300'}`}>{prediction.isHealthy ? 'Crop appears healthy. Continue regular monitoring.' : `Disease detected with ${prediction.confidence.toFixed(1)}% confidence. Use the AI Chat for treatment advice.`}</p>
-              </div>
-            </div>
-          )}
-
-          {scanError && !scanning && (
-            <div className="mx-4 mt-3 p-4 bg-red-500/10 border border-red-500/25 rounded-2xl flex items-start gap-2">
-              <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-xs font-bold text-red-400">Scan Failed</p>
-                <p className="text-[11px] text-red-400/70 mt-0.5">{scanError}</p>
-                <p className="text-[10px] text-gray-600 mt-1">Ensure ESP32-CAM and Raspberry Pi are on network 172.16.x.x</p>
-              </div>
-            </div>
-          )}
-
-          <div className="px-4 pt-3 pb-5 space-y-2.5">
-            <button onClick={handleESP32Scan} disabled={scanning}
-              className={`w-full flex items-center justify-center gap-3 py-4 rounded-2xl font-extrabold text-sm tracking-wide transition-all ${scanning ? 'bg-green-800/40 text-green-500 cursor-not-allowed' : 'bg-green-600 hover:bg-green-500 text-white active:scale-[0.98] shadow-lg shadow-green-500/25'}`}>
-              {scanning ? <><div className="w-4 h-4 border-2 border-green-400 border-t-transparent rounded-full animate-spin" /><span>{previewUrl ? 'Running Edge AI Inference�' : 'Capturing from ESP32-CAM�'}</span></> : <><ScanLine className="w-5 h-5" /><span>Scan Crop for Disease</span></>}
-            </button>
-            <button onClick={() => fileInputRef.current?.click()} disabled={scanning}
-              className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm border transition-all ${scanning ? 'border-gray-700 text-gray-600 cursor-not-allowed' : `${T.cardBorder} border text-gray-400 hover:text-gray-200 active:scale-[0.98]`}`}>
-              <Camera className="w-4 h-4" /><span>Upload Image (Test Mode)</span>
-            </button>
-          </div>
-          <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
-        </div>
-
-        {/* SECTION 3+ � AI RECOMMENDATIONS (unchanged) */}
+        {/* SECTION 3+ - AI RECOMMENDATIONS (unchanged) */}
         <div className={`${T.cardBg} rounded-2xl p-4 ${T.cardBorder} border shadow-sm`}>
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-lg">Overall Soil Health</h2>

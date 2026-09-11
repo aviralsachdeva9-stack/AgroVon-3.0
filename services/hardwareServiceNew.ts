@@ -1,7 +1,7 @@
 // src/services/hardwareService.ts
 
 // Hardware device configuration (AgroVON 2.0 Raspberry Pi Edge Server)
-const HARDWARE_URL = import.meta.env.VITE_HARDWARE_URL || "http://172.16.32.64:5000/sensors";
+const HARDWARE_URL = import.meta.env.VITE_HARDWARE_URL || "http://192.168.137.56:5000/api/farm-status";
 
 export interface SensorData {
   soilTemp?: number;

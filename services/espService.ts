@@ -1,6 +1,6 @@
 // src/services/espService.ts
 
-const ESP_URL = import.meta.env.VITE_HARDWARE_URL || "http://192.168.4.1/data";
+const ESP_URL = import.meta.env.VITE_HARDWARE_URL || "http://192.168.137.56:5000/api/farm-status";
 
 export interface SensorData {
   N: number;

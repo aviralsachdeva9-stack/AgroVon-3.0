@@ -60,22 +60,13 @@ const HomeView: React.FC<HomeViewProps> = ({
 
   // --- STATE ---
   const [farmData, setFarmData] = useState<any>({ 
-    disaster_alert: "✅ Safe",
-    ai_vision: {
-      disease_detected: "Scanning...",
-      confidence: 0
-    },
-    node_1: {
-      temp: 0,
-      moisture: 0,
-      rain: "No Rain"
-    },
-    node_2: {
-      temp: 0,
-      moisture: 0,
-      rain: "No Rain"
-    }
+    status: "Safe",
+    temperature: 0,
+    moisture: 0,
+    rain_val: "No Rain"
   });
+
+  const [camTime, setCamTime] = useState(Date.now());
 
   // Fetch Farm Status
   useEffect(() => {
@@ -87,6 +78,13 @@ const HomeView: React.FC<HomeViewProps> = ({
     }, 2000);
     return () => clearInterval(interval);
   }, []);
+
+  // Refresh Camera Feed
+  useEffect(() => {
+    const camInterval = setInterval(() => setCamTime(Date.now()), 1500); // 1.5s refresh for ESP32 capture
+    return () => clearInterval(camInterval);
+  }, []);
+
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
   const [forecast, setForecast] = useState<ForecastDay[]>([]);
@@ -384,68 +382,45 @@ const HomeView: React.FC<HomeViewProps> = ({
         </div>
 
         {/* 🔴 LIVE AI VIDEO STREAM */}
-        <div className="w-full h-[260px] rounded-2xl overflow-hidden border-4 border-green-500 mb-4 shadow-lg relative bg-black">
-          <iframe 
-            src="http://192.168.137.56:5000/video_feed" 
-            className="w-full h-full border-0 object-cover"
-            sandbox="allow-scripts allow-same-origin"
-            title="Live Farm Stream"
+        <div className="w-full h-[260px] rounded-2xl overflow-hidden border-4 border-green-500 mb-4 shadow-lg relative bg-black flex items-center justify-center">
+          <img 
+            src={`http://192.168.137.86/capture?t=${camTime}`} 
+            alt="ESP32 Live Stream"
+            className="w-full h-full object-cover"
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            onLoad={(e) => { e.currentTarget.style.display = 'block'; }}
           />
           <div className="absolute top-3 left-3 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-md animate-pulse flex items-center gap-1.5 shadow-md">
-            <div className="w-1.5 h-1.5 bg-white rounded-full"></div> LIVE
+            <div className="w-1.5 h-1.5 bg-white rounded-full"></div> ESP32 LIVE
           </div>
         </div>
 
         {/* 🚨 DISASTER ALERT CARD */}
-        <div className={`p-4 rounded-xl shadow-sm border mb-4 ${farmData.disaster_alert !== "✅ Safe" ? 'bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/30' : 'bg-green-50 dark:bg-green-500/10 border-green-200 dark:border-green-500/30'}`}>
+        <div className={`p-4 rounded-xl shadow-sm border mb-4 ${(farmData.status ?? farmData.disaster_alert) !== "Safe" ? 'bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/30' : 'bg-green-50 dark:bg-green-500/10 border-green-200 dark:border-green-500/30'}`}>
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Disaster Status</span>
-            <span className={`text-lg font-black ${farmData.disaster_alert !== "✅ Safe" ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>{farmData.disaster_alert}</span>
+            <span className={`text-lg font-black ${(farmData.status ?? farmData.disaster_alert) !== "Safe" ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>{(farmData.status ?? farmData.disaster_alert) === "Safe" ? "✅ Safe" : "🚨 " + (farmData.status ?? farmData.disaster_alert)}</span>
           </div>
         </div>
 
-        {/* 🦠 AI DISEASE DETECTION CARD */}
-        <div className="mb-4 bg-white dark:bg-[#1a2e28] p-4 rounded-xl border border-gray-100 dark:border-[#2d4a3e] shadow-sm relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-2 opacity-5"><Camera className="w-16 h-16 text-green-500" /></div>
+        {/* 📡 SENSOR ZONE DATA */}
+        <div className="bg-white dark:bg-[#1a2e28] p-4 rounded-2xl border border-gray-100 dark:border-[#2d4a3e] relative overflow-hidden group shadow-sm mb-4">
           <div className="flex items-center gap-2 mb-3">
-            <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Live Crop Vision</span>
+            <div className="w-6 h-6 rounded-lg bg-green-100 dark:bg-green-500/20 flex items-center justify-center"><Cpu className="w-3 h-3 text-green-600 dark:text-green-400" /></div>
+            <span className="text-sm font-bold text-gray-900 dark:text-white">Zone 1 (Master Node)</span>
           </div>
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Prediction</span>
-              <span className="text-sm font-black text-orange-500 dark:text-orange-400">{farmData.ai_vision.disease_detected}</span>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="bg-orange-50 dark:bg-orange-500/10 p-2 rounded-lg border border-orange-100 dark:border-orange-500/20">
+              <span className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Temp</span>
+              <span className="text-lg font-black text-orange-500">{farmData.temperature ?? farmData.temp ?? 0}°C</span>
             </div>
-            <div className="flex items-center justify-between mt-1">
-              <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Confidence</span>
-              <span className="text-xs font-bold bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400 px-2 py-0.5 rounded-full">{farmData.ai_vision.confidence}%</span>
+            <div className="bg-blue-50 dark:bg-blue-500/10 p-2 rounded-lg border border-blue-100 dark:border-blue-500/20">
+              <span className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Moisture</span>
+              <span className="text-lg font-black text-blue-500">{farmData.moisture ?? farmData.moist ?? 0}%</span>
             </div>
-          </div>
-        </div>
-
-        {/* 📡 SENSOR NODES DATA */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-white dark:bg-[#1a2e28] p-4 rounded-2xl border border-gray-100 dark:border-[#2d4a3e] relative overflow-hidden group shadow-sm">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-6 h-6 rounded-lg bg-green-100 dark:bg-green-500/20 flex items-center justify-center"><Cpu className="w-3 h-3 text-green-600 dark:text-green-400" /></div>
-              <span className="text-xs font-bold text-gray-900 dark:text-white">Zone 1 (Master)</span>
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center"><span className="text-[10px] text-gray-500 uppercase">Temp</span><span className="text-sm font-bold text-orange-500">{farmData.node_1.temp}°C</span></div>
-              <div className="flex justify-between items-center"><span className="text-[10px] text-gray-500 uppercase">Moisture</span><span className="text-sm font-bold text-blue-500">{farmData.node_1.moisture}%</span></div>
-              <div className="flex justify-between items-center"><span className="text-[10px] text-gray-500 uppercase">Rain Val</span><span className="text-xs font-bold text-indigo-400">{farmData.node_1.rain}</span></div>
-            </div>
-          </div>
-
-          <div className="bg-white dark:bg-[#1a2e28] p-4 rounded-2xl border border-gray-100 dark:border-[#2d4a3e] relative overflow-hidden group shadow-sm">
-            <div className="flex items-center gap-2 mb-3">
-              <div className="w-6 h-6 rounded-lg bg-teal-100 dark:bg-teal-500/20 flex items-center justify-center"><Cpu className="w-3 h-3 text-teal-600 dark:text-teal-400" /></div>
-              <span className="text-xs font-bold text-gray-900 dark:text-white">Zone 2 (Slave)</span>
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center"><span className="text-[10px] text-gray-500 uppercase">Temp</span><span className="text-sm font-bold text-orange-500">{farmData.node_2.temp}°C</span></div>
-              <div className="flex justify-between items-center"><span className="text-[10px] text-gray-500 uppercase">Moisture</span><span className="text-sm font-bold text-blue-500">{farmData.node_2.moisture}%</span></div>
-              <div className="flex justify-between items-center"><span className="text-[10px] text-gray-500 uppercase">Rain Val</span><span className="text-xs font-bold text-indigo-400">{farmData.node_2.rain}</span></div>
+            <div className="bg-indigo-50 dark:bg-indigo-500/10 p-2 rounded-lg border border-indigo-100 dark:border-indigo-500/20">
+              <span className="block text-[10px] text-gray-500 uppercase font-bold mb-1">Rain</span>
+              <span className="text-sm font-black text-indigo-500 flex items-center justify-center h-full pb-1">{farmData.rain_val ?? farmData.rain ?? "No Rain"}</span>
             </div>
           </div>
         </div>
