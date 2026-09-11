@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   ArrowLeft, RefreshCw, AlertTriangle, CheckCircle, Clock,
   TrendingUp, Droplets, Thermometer, Wind, Activity,
-  Camera, ScanLine, Zap, WifiOff, Server, Cpu,
+  Camera, ScanLine, Zap, WifiOff, Server, Cpu, CloudRain, Plug,
 } from 'lucide-react';
 import { ViewState } from '../types';
 import {
@@ -10,7 +10,7 @@ import {
   getSoilHealthColor, getSoilHealthIcon,
 } from '../services/soilAnalysisService';
 
-const PI_URL    = 'http://172.16.32.64:5000';
+const PI_URL    = 'http://192.168.137.56:5000';
 const ESP32_URL = 'http://172.16.32.64:5001';
 const POLL_MS   = 6000;
 
@@ -27,6 +27,8 @@ interface SensorTelemetry {
   moisture:    number | null;
   ambientTemp: number | null;
   humidity:    number | null;
+  disasterRisk: string;
+  pumpStatus: string;
 }
 
 interface PredictionResult {
@@ -42,7 +44,7 @@ const parsePredictionString = (raw: string): PredictionResult => {
   const confMatch  = raw.match(/\((\d+\.?\d*)%\)/);
   const confidence = confMatch ? parseFloat(confMatch[1]) : 0;
   const classMatch = raw.match(/[Cc]lass\s*(\d+)/);
-  const classId    = classMatch ? classMatch[1] : '—';
+  const classId    = classMatch ? classMatch[1] : 'ï¿½';
   const className  = classMatch ? `Class ${classId}` : raw.replace(/\(.*\)/, '').trim();
   return { rawString: raw, classId, className, confidence, isHealthy: raw.toLowerCase().includes('healthy'), timestamp: new Date().toLocaleTimeString() };
 };
@@ -60,7 +62,7 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
   const [analysis,  setAnalysis]  = useState<SoilAnalysis | null>(null);
   const [aiLoading, setAiLoading] = useState(true);
   const [aiError,   setAiError]   = useState<string | null>(null);
-  const [sensors,   setSensors]   = useState<SensorTelemetry>({ soilTemp: null, moisture: null, ambientTemp: null, humidity: null });
+  const [sensors,   setSensors]   = useState<SensorTelemetry>({ soilTemp: null, moisture: null, ambientTemp: null, humidity: null, disasterRisk: 'Safe', pumpStatus: 'OFF' });
   const [hwOnline,  setHwOnline]  = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [sensorError, setSensorError] = useState<string | null>(null);
@@ -102,9 +104,16 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
       const res = await fetch(`${PI_URL}/sensors`, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(5000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const d = await res.json();
-      setSensors({ soilTemp: parseFloat(d.soilTemp) ?? null, moisture: parseFloat(d.moisture) ?? null, ambientTemp: parseFloat(d.ambientTemp) ?? null, humidity: parseFloat(d.humidity) ?? null });
+      setSensors({ 
+        soilTemp: parseFloat(d.soilTemp) ?? null, 
+        moisture: parseFloat(d.moisture) ?? null, 
+        ambientTemp: parseFloat(d.ambientTemp) ?? null, 
+        humidity: parseFloat(d.humidity) ?? null,
+        disasterRisk: 'Safe', // Mock placeholder
+        pumpStatus: 'OFF'     // Mock placeholder
+      });
       setHwOnline(true); setSensorError(null); setLastUpdated(new Date().toLocaleTimeString());
-    } catch (err: any) { setHwOnline(false); setSensorError(`Agro-Bozo offline — ${err.message}`); }
+    } catch (err: any) { setHwOnline(false); setSensorError(`Agro-Bozo offline ï¿½ ${err.message}`); }
   }, []);
 
   useEffect(() => { fetchSensors(); const id = setInterval(fetchSensors, POLL_MS); return () => clearInterval(id); }, [fetchSensors]);
@@ -137,7 +146,7 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
       if (!imgRes.ok) throw new Error(`ESP32-CAM HTTP ${imgRes.status}`);
       const blob = await imgRes.blob(); const url = URL.createObjectURL(blob);
       stopScanAnim(); await runScan(blob, url);
-    } catch (err: any) { stopScanAnim(); setScanning(false); setScanError(`ESP32-CAM unreachable — ${err.message}`); }
+    } catch (err: any) { stopScanAnim(); setScanning(false); setScanError(`ESP32-CAM unreachable ï¿½ ${err.message}`); }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -155,8 +164,8 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
       <div className="flex flex-col items-center justify-center py-24 gap-4">
         <div className="w-14 h-14 rounded-2xl bg-green-500/20 flex items-center justify-center animate-pulse"><Server className="w-7 h-7 text-green-400" /></div>
         <div className="animate-spin w-10 h-10 border-2 border-green-500 border-t-transparent rounded-full" />
-        <p className={T.subText}>Connecting to Agro-Bozo…</p>
-        <p className="text-xs text-gray-600">Raspberry Pi 5 · 172.16.32.64:5000</p>
+        <p className={T.subText}>Connecting to Agro-Bozoï¿½</p>
+        <p className="text-xs text-gray-600">Raspberry Pi 5 ï¿½ 172.16.32.64:5000</p>
       </div>
     </div>
   );
@@ -192,7 +201,7 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
             <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border ${s.bg} ${s.color}`}>{s.label}</span>
           </div>
           <div className="flex items-end gap-1.5 mb-2">
-            <span className={`text-4xl font-black leading-none ${s.color}`}>{v !== null ? v.toFixed(1) : '—'}</span>
+            <span className={`text-4xl font-black leading-none ${s.color}`}>{v !== null ? v.toFixed(1) : 'ï¿½'}</span>
             <span className="text-sm text-gray-500 mb-1">{unit}</span>
           </div>
           <div className="h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
@@ -212,7 +221,7 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
           <h1 className="text-lg font-extrabold tracking-tight">Soil & Crop Health</h1>
           <div className="flex items-center gap-1.5 mt-0.5">
             <div className={`w-1.5 h-1.5 rounded-full ${hwOnline ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
-            <span className={`text-[10px] font-bold tracking-wide ${hwOnline ? 'text-green-400' : 'text-gray-500'}`}>{hwOnline ? `AGRO-BOZO LIVE · ${lastUpdated}` : 'HARDWARE OFFLINE'}</span>
+            <span className={`text-[10px] font-bold tracking-wide ${hwOnline ? 'text-green-400' : 'text-gray-500'}`}>{hwOnline ? `AGRO-BOZO LIVE ï¿½ ${lastUpdated}` : 'HARDWARE OFFLINE'}</span>
           </div>
         </div>
         <button onClick={() => { performAnalysis(); fetchSensors(); }} className={`p-2 ${T.btnBg} rounded-full`}><RefreshCw className="w-4 h-4" /></button>
@@ -220,28 +229,54 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
 
       <div className="p-4 space-y-5">
 
-        {/* SECTION 1 — SENSOR TELEMETRY */}
+        {/* SECTION 1 ï¿½ SENSOR TELEMETRY */}
         <div className={`${T.cardBg} rounded-3xl p-5 ${T.cardBorder} border shadow-xl`}>
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-xl bg-green-500/20 flex items-center justify-center"><Activity className="w-4 h-4 text-green-400" /></div>
               <div>
                 <h2 className="font-bold text-sm">Live Sensor Telemetry</h2>
-                <p className="text-[10px] text-gray-500">Agro-Bozo Node · polling every {POLL_MS / 1000}s</p>
+                <p className="text-[10px] text-gray-500">Agro-Bozo Node ï¿½ polling every {POLL_MS / 1000}s</p>
+                <p className="text-[10px] text-gray-500">Agro-Bozo Node  polling every {POLL_MS / 1000}s</p>
               </div>
             </div>
             {!hwOnline && <div className="flex items-center gap-1 text-[10px] text-gray-500 bg-gray-500/10 px-2 py-1 rounded-full border border-gray-500/20"><WifiOff className="w-3 h-3" /><span>Offline</span></div>}
           </div>
           {sensorError && <div className="mb-3 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center gap-2"><AlertTriangle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" /><p className="text-[11px] text-red-400">{sensorError}</p></div>}
           <div className="space-y-3">
-            <SensorCard v={sensors.soilTemp}    low={15} high={32}  max={60}  icon={<Thermometer className="w-5 h-5 text-orange-400" />} label="Soil Temperature"   sub="DS18B20" unit="°C" chipColor="bg-orange-500/20" />
+            <SensorCard v={sensors.soilTemp}    low={15} high={32}  max={60}  icon={<Thermometer className="w-5 h-5 text-orange-400" />} label="Soil Temperature"   sub="DS18B20" unit="Â°C" chipColor="bg-orange-500/20" />
             <SensorCard v={sensors.moisture}    low={30} high={70}  max={100} icon={<Droplets className="w-5 h-5 text-blue-400" />}     label="Soil Moisture"      sub="MOIST."  unit="%" chipColor="bg-blue-500/20" />
-            <SensorCard v={sensors.ambientTemp} low={15} high={35}  max={60}  icon={<Thermometer className="w-5 h-5 text-yellow-400" />} label="Ambient Temperature" sub="DHT"     unit="°C" chipColor="bg-yellow-500/20" />
+            <SensorCard v={sensors.ambientTemp} low={15} high={35}  max={60}  icon={<Thermometer className="w-5 h-5 text-yellow-400" />} label="Ambient Temperature" sub="DHT"     unit="Â°C" chipColor="bg-yellow-500/20" />
             <SensorCard v={sensors.humidity}    low={40} high={80}  max={100} icon={<Wind className="w-5 h-5 text-teal-400" />}         label="Air Humidity"       sub="DHT"     unit="%" chipColor="bg-teal-500/20" />
+            
+            {/* NEW CARDS - DISASTER & PUMP RELAY */}
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              <div className={`p-4 ${T.innerCard} rounded-2xl border border-[#2d4a3e] relative overflow-hidden`}>
+                <div className="absolute top-0 right-0 p-3 opacity-10"><CloudRain className="w-10 h-10 text-indigo-400" /></div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-500/20 flex items-center justify-center"><CloudRain className="w-4 h-4 text-indigo-400" /></div>
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Rain & Flood Monitor</span>
+                </div>
+                <div className="flex items-end justify-between mt-3">
+                  <span className={`text-xl font-black ${sensors.disasterRisk === 'Safe' ? 'text-green-400' : sensors.disasterRisk === 'Warning' ? 'text-yellow-400' : 'text-red-400'}`}>{sensors.disasterRisk}</span>
+                </div>
+              </div>
+              <div className={`p-4 ${T.innerCard} rounded-2xl border border-[#2d4a3e] relative overflow-hidden`}>
+                <div className="absolute top-0 right-0 p-3 opacity-10"><Plug className="w-10 h-10 text-cyan-400" /></div>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="w-8 h-8 rounded-xl bg-cyan-500/20 flex items-center justify-center"><Plug className="w-4 h-4 text-cyan-400" /></div>
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Pump Status & Relay</span>
+                </div>
+                <div className="flex items-end justify-between mt-3">
+                  <span className={`text-xl font-black ${sensors.pumpStatus === 'ON' ? 'text-blue-400' : 'text-gray-500'}`}>{sensors.pumpStatus}</span>
+                  <button className={`px-3 py-1 rounded-full text-[10px] font-bold border ${sensors.pumpStatus === 'ON' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : 'bg-gray-500/20 text-gray-400 border-gray-500/30'}`}>TOGGLE</button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* SECTION 2 — AI SCANNER */}
+        {/* SECTION 2  AI SCANNER */}
         <div className={`${T.cardBg} rounded-3xl ${T.cardBorder} border shadow-xl overflow-hidden`}>
           <div className="px-5 pt-5 pb-4 border-b border-[#2d4a3e]">
             <div className="flex items-center justify-between">
@@ -249,7 +284,7 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
                 <div className="w-10 h-10 rounded-xl bg-green-500/20 flex items-center justify-center"><Zap className="w-5 h-5 text-green-400" /></div>
                 <div>
                   <h2 className="font-extrabold text-base tracking-tight">Agro-Bozo AI Scanner</h2>
-                  <p className="text-[10px] text-gray-500">ESP32-CAM Vision Node · MobileNetV2 TFLite</p>
+                  <p className="text-[10px] text-gray-500">ESP32-CAM Vision Node ï¿½ MobileNetV2 TFLite</p>
                 </div>
               </div>
               <div className="text-right">
@@ -267,7 +302,7 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
                   <div className="w-16 h-16 rounded-2xl bg-green-500/10 border border-green-500/20 flex items-center justify-center"><Camera className="w-7 h-7 text-green-600" /></div>
                   <div className="text-center px-8">
                     <p className="text-sm font-semibold text-gray-400">ESP32-CAM Preview</p>
-                    <p className="text-[11px] text-gray-600 mt-1">{scanning ? 'Capturing frame from vision node…' : 'Tap "Scan Crop" to trigger the ESP32-CAM and run disease detection.'}</p>
+                    <p className="text-[11px] text-gray-600 mt-1">{scanning ? 'Capturing frame from vision nodeï¿½' : 'Tap "Scan Crop" to trigger the ESP32-CAM and run disease detection.'}</p>
                   </div>
                 </div>
             }
@@ -278,7 +313,7 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
                 {['top-3 left-3 border-t-2 border-l-2 rounded-tl','top-3 right-3 border-t-2 border-r-2 rounded-tr','bottom-3 left-3 border-b-2 border-l-2 rounded-bl','bottom-3 right-3 border-b-2 border-r-2 rounded-br'].map((c,i) => <div key={i} className={`absolute w-5 h-5 border-green-400 ${c}`} />)}
                 <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-2 px-3.5 py-1.5 bg-black/75 rounded-full border border-green-500/40 backdrop-blur-sm">
                   <div className="flex gap-0.5">{[0,1,2].map(i => <div key={i} className="w-1 h-1 rounded-full bg-green-400 animate-bounce" style={{ animationDelay: `${i*0.15}s` }} />)}</div>
-                  <span className="text-[11px] font-bold text-green-300">{previewUrl ? 'Running Inference · MobileNetV2' : 'Fetching Frame · ESP32-CAM'}</span>
+                  <span className="text-[11px] font-bold text-green-300">{previewUrl ? 'Running Inference ï¿½ MobileNetV2' : 'Fetching Frame ï¿½ ESP32-CAM'}</span>
                 </div>
               </>
             )}
@@ -292,10 +327,10 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
                 <span className="text-[9px] text-gray-600">{prediction.timestamp}</span>
               </div>
 
-              {/* Raw result string — prominent display */}
+              {/* Raw result string ï¿½ prominent display */}
               <div className={`px-4 py-3 rounded-xl mb-4 ${prediction.isHealthy ? 'bg-green-500/15' : 'bg-red-500/15'}`}>
                 <p className={`text-base font-black leading-tight ${prediction.isHealthy ? 'text-green-300' : 'text-red-300'}`}>{prediction.rawString}</p>
-                <p className="text-[10px] text-gray-500 mt-1">Raw output · Raspberry Pi 5 Flask Server</p>
+                <p className="text-[10px] text-gray-500 mt-1">Raw output ï¿½ Raspberry Pi 5 Flask Server</p>
               </div>
 
               {/* Parsed class + confidence */}
@@ -341,7 +376,7 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
           <div className="px-4 pt-3 pb-5 space-y-2.5">
             <button onClick={handleESP32Scan} disabled={scanning}
               className={`w-full flex items-center justify-center gap-3 py-4 rounded-2xl font-extrabold text-sm tracking-wide transition-all ${scanning ? 'bg-green-800/40 text-green-500 cursor-not-allowed' : 'bg-green-600 hover:bg-green-500 text-white active:scale-[0.98] shadow-lg shadow-green-500/25'}`}>
-              {scanning ? <><div className="w-4 h-4 border-2 border-green-400 border-t-transparent rounded-full animate-spin" /><span>{previewUrl ? 'Running Edge AI Inference…' : 'Capturing from ESP32-CAM…'}</span></> : <><ScanLine className="w-5 h-5" /><span>Scan Crop for Disease</span></>}
+              {scanning ? <><div className="w-4 h-4 border-2 border-green-400 border-t-transparent rounded-full animate-spin" /><span>{previewUrl ? 'Running Edge AI Inferenceï¿½' : 'Capturing from ESP32-CAMï¿½'}</span></> : <><ScanLine className="w-5 h-5" /><span>Scan Crop for Disease</span></>}
             </button>
             <button onClick={() => fileInputRef.current?.click()} disabled={scanning}
               className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl font-semibold text-sm border transition-all ${scanning ? 'border-gray-700 text-gray-600 cursor-not-allowed' : `${T.cardBorder} border text-gray-400 hover:text-gray-200 active:scale-[0.98]`}`}>
@@ -351,7 +386,7 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
           <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileUpload} />
         </div>
 
-        {/* SECTION 3+ — AI RECOMMENDATIONS (unchanged) */}
+        {/* SECTION 3+ ï¿½ AI RECOMMENDATIONS (unchanged) */}
         <div className={`${T.cardBg} rounded-2xl p-4 ${T.cardBorder} border shadow-sm`}>
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-lg">Overall Soil Health</h2>
@@ -375,7 +410,7 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
             ].map(({ icon, label, color, items }) => (
               <div key={label}>
                 <div className="flex items-center gap-2 mb-2">{icon}<h3 className={`font-medium ${color}`}>{label}</h3></div>
-                <ul className="space-y-1">{items.map((item, i) => <li key={i} className="text-sm flex items-start gap-2"><span className={`${color} mt-1`}>•</span><span>{item}</span></li>)}</ul>
+                <ul className="space-y-1">{items.map((item, i) => <li key={i} className="text-sm flex items-start gap-2"><span className={`${color} mt-1`}>ï¿½</span><span>{item}</span></li>)}</ul>
               </div>
             ))}
           </div>

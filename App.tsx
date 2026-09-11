@@ -106,22 +106,9 @@ function App() {
     playWelcome();
   }, [currentView, hasWelcomed, userProfile, language]);
 
-  // Simulate Random Notification
+  // Simulate Random Notification - REMOVED (User requested no dummy data)
   useEffect(() => {
-    if (currentView === ViewState.HOME && !activeNotification && userProfile) {
-       const timer = setTimeout(() => {
-           const notifs = TRANSLATIONS[language]?.notifications || TRANSLATIONS['en'].notifications;
-           if (Math.random() > 0.7) {
-               setActiveNotification({
-                   key: Date.now().toString(),
-                   title: notifs.weatherAlert.title,
-                   message: notifs.weatherAlert.message.replace('{location}', userProfile.district || 'your area'),
-                   type: 'alert'
-               });
-           }
-       }, 8000);
-       return () => clearTimeout(timer);
-    }
+    // Only real alerts should be shown. The dummy setTimeout alert was removed.
   }, [currentView, activeNotification, language, userProfile]);
 
   // Update soil data when hardware data is available
@@ -263,7 +250,7 @@ function App() {
       case ViewState.SCHEMES: 
         return <SchemesView setView={setView} language={language} />;
       case ViewState.NEWS:
-        return <NewsView setView={setView} isDarkMode={isDarkMode} />;
+        return <NewsView setView={setView} isDarkMode={isDarkMode} language={language} userProfile={userProfile} />;
       case ViewState.SOIL_ANALYSIS:
         return <SoilAnalysisView setView={setView} isDarkMode={isDarkMode} soilData={soilData} userProfile={userProfile} language={language} />;
       case ViewState.PROFILE:

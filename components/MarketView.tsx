@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Bell, MapPin, TrendingUp, TrendingDown, Navigation, Search, X } from 'lucide-react';
+import { ArrowLeft, Bell, MapPin, TrendingUp, TrendingDown, Navigation, Search, X, AlertCircle } from 'lucide-react';
 import { ViewState } from '../types';
-import { fetchLiveMandiPrices, findBestMandi, MandiRecord } from '../services/mandiService';
+import { fetchMandiByGPS, fetchLiveMandiPrices, findBestMandi, MandiRecord, MandiResult, SUPPORTED_STATES } from '../services/mandiService';
 
 interface MarketViewProps {
   setView: (view: ViewState) => void;
@@ -108,12 +108,15 @@ const MarketView: React.FC<MarketViewProps> = ({ setView, language, isDarkMode =
   const [mandiList, setMandiList] = useState<MandiRecord[]>([]);
   const [bestMandi, setBestMandi] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [isFallback, setIsFallback] = useState(false);
+  const [isFallbackAllCrops, setIsFallbackAllCrops] = useState(false);
   
   // --- SEARCH STATE ---
   const [showSearch, setShowSearch] = useState(false);
   const [searchState, setSearchState] = useState("Uttar Pradesh");
   const [searchDistrict, setSearchDistrict] = useState("");
-  const [detectedLocation, setDetectedLocation] = useState("Detecting...");
+  const [detectedLocation, setDetectedLocation] = useState("Detecting location...");
 
   // Theme classes
   const themeClasses = {
@@ -132,57 +135,57 @@ const MarketView: React.FC<MarketViewProps> = ({ setView, language, isDarkMode =
     selectBg: isDarkMode ? 'bg-transparent' : 'bg-transparent'
   };
 
-  // Initial Load (Auto-Detect)
+  // Initial Load — GPS auto-detect
   useEffect(() => {
-    loadMarketData("Uttar Pradesh", "Gautam Budh Nagar", true);
+    autoDetectAndLoad();
   }, [selectedCrop]);
 
-  const loadMarketData = async (state: string, district: string, autoDetect: boolean = false) => {
+  const autoDetectAndLoad = async () => {
     setLoading(true);
-    setMandiList([]); 
-
-    if (autoDetect) {
-        // Fallback Logic
-        let data = await fetchLiveMandiPrices(state, district, selectedCrop);
-        let finalDistrict = district;
-        
-        if (!data || data.length === 0) {
-           // Try Ghaziabad
-           data = await fetchLiveMandiPrices(state, "Ghaziabad", selectedCrop);
-           if (data?.length > 0) finalDistrict = "Ghaziabad";
-        }
-        if (!data || data.length === 0) {
-           // Try Agra
-           data = await fetchLiveMandiPrices(state, "Agra", selectedCrop);
-           if (data?.length > 0) finalDistrict = "Agra";
-        }
-        updateUI(data, finalDistrict, state);
-    } else {
-        // Manual Search
-        const data = await fetchLiveMandiPrices(state, district, selectedCrop);
-        updateUI(data, district, state);
-    }
-  };
-
-  const updateUI = (data: MandiRecord[] | null, district: string, state: string) => {
-      if (data && data.length > 0) {
-        setMandiList(data);
-        setBestMandi(findBestMandi(data));
-        setDetectedLocation(`${district}, ${state === "Uttar Pradesh" ? "UP" : state}`);
-        setShowSearch(false); 
-      } else {
-        setMandiList([]);
-        setBestMandi(null);
-        setDetectedLocation(`${district} (No Data)`);
-      }
+    setApiError(null);
+    setMandiList([]);
+    try {
+      // Try GPS → Nominatim → OGD
+      const result: MandiResult = await fetchMandiByGPS(selectedCrop);
+      applyResult(result);
+    } catch (gpsErr: any) {
+      // GPS denied — show search panel and ask user to enter manually
+      console.warn("📍 GPS denied:", gpsErr?.message);
+      setDetectedLocation("Location denied — search manually");
+      setApiError("Location permission denied. Please search your district below.");
+      setShowSearch(true);
       setLoading(false);
+    }
   };
 
-  const handleManualSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (searchDistrict.trim()) {
-      loadMarketData(searchState, searchDistrict, false);
+  const applyResult = (result: MandiResult) => {
+    if (result.records.length > 0) {
+      setMandiList(result.records);
+      setBestMandi(findBestMandi(result.records));
+      setDetectedLocation(`${result.district}, ${result.state}`);
+      setIsFallback(result.isFallback);
+      setIsFallbackAllCrops(result.isFallbackAllCrops);
+      setApiError(null);
+      setShowSearch(false);
+    } else {
+      setMandiList([]);
+      setBestMandi(null);
+      setIsFallback(false);
+      setIsFallbackAllCrops(false);
+      setDetectedLocation(`${result.district} — No data`);
+      setApiError(result.error || `No Mandi records found for ${result.district}, ${result.state}`);
     }
+    setLoading(false);
+  };
+
+  const handleManualSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchDistrict.trim()) return;
+    setLoading(true);
+    setApiError(null);
+    setMandiList([]);
+    const result = await fetchLiveMandiPrices(searchState, searchDistrict.trim(), selectedCrop);
+    applyResult(result);
   };
 
   return (
@@ -212,12 +215,9 @@ const MarketView: React.FC<MarketViewProps> = ({ setView, language, isDarkMode =
                 onChange={(e) => setSearchState(e.target.value)}
                 className={`w-full ${themeClasses.inputBg} p-3 rounded-xl border outline-none text-sm ${themeClasses.text}`}
               >
-                <option value="Uttar Pradesh" className="text-black">Uttar Pradesh</option>
-                <option value="Punjab" className="text-black">Punjab</option>
-                <option value="Haryana" className="text-black">Haryana</option>
-                <option value="Madhya Pradesh" className="text-black">Madhya Pradesh</option>
-                <option value="Maharashtra" className="text-black">Maharashtra</option>
-                <option value="Rajasthan" className="text-black">Rajasthan</option>
+                {SUPPORTED_STATES.map((s) => (
+                  <option key={s} value={s} className="text-black">{s}</option>
+                ))}
               </select>
               <input 
                 type="text" 
@@ -269,9 +269,20 @@ const MarketView: React.FC<MarketViewProps> = ({ setView, language, isDarkMode =
           <p className={`text-sm ${themeClasses.subText}`}>{t.fetching}</p>
         </div>
       ) : mandiList.length === 0 ? (
-        <div className={`text-center py-20 ${themeClasses.subText}`}>
-           <p>{t.noData} {selectedCrop}.</p>
-           <p className={`text-xs mt-2 opacity-50`}>{t.trySearch}</p>
+        <div className={`text-center py-16 ${themeClasses.subText} space-y-3`}>
+          <AlertCircle className="w-10 h-10 mx-auto opacity-40" />
+          <p className="font-semibold text-sm">{t.noData} {selectedCrop}</p>
+          {apiError && (
+            <p className={`text-xs px-4 py-2 rounded-xl mx-4 ${
+              isDarkMode ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-600'
+            }`}>{apiError}</p>
+          )}
+          <button
+            onClick={() => setShowSearch(true)}
+            className="text-xs text-green-500 underline mt-2"
+          >
+            {t.trySearch}
+          </button>
         </div>
       ) : (
         <>
@@ -322,6 +333,30 @@ const MarketView: React.FC<MarketViewProps> = ({ setView, language, isDarkMode =
             </div>
           )}
 
+          {/* FALLBACK BANNER — L2: state+crop / L3: all crops */}
+          {(isFallback || isFallbackAllCrops) && (
+            <div className={`flex items-start gap-3 px-4 py-3 rounded-2xl border ${
+              isDarkMode
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                : 'bg-amber-50 border-amber-200 text-amber-700'
+            }`}>
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <p className="text-xs leading-relaxed">
+                {isFallbackAllCrops ? (
+                  <>
+                    No <strong>{selectedCrop}</strong> data found in {mandiList[0]?.state} today.<br />
+                    <span className="font-semibold">Showing all available crops from nearby markets.</span>
+                  </>
+                ) : (
+                  <>
+                    No data for your exact district.<br />
+                    <span className="font-semibold">Showing latest <strong>{selectedCrop}</strong> prices from nearby markets in {mandiList[0]?.state}.</span>
+                  </>
+                )}
+              </p>
+            </div>
+          )}
+
           {/* MANDI LIST */}
           <div>
             <div className="flex justify-between items-end mb-4">
@@ -335,8 +370,19 @@ const MarketView: React.FC<MarketViewProps> = ({ setView, language, isDarkMode =
                   <div>
                     <h3 className={`font-bold ${themeClasses.text} text-md`}>{mandi.market}</h3>
                     <div className={`flex items-center gap-1 text-xs ${themeClasses.subText} mt-1`}>
-                       <MapPin className="w-3 h-3" /> {mandi.district}, {mandi.state}
+                       <MapPin className="w-3 h-3" />
+                       <span>{mandi.district}, {mandi.state}</span>
+                       {isFallback && (
+                         <span className={`ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${
+                           isDarkMode ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-100 text-amber-600'
+                         }`}>Nearby</span>
+                       )}
                     </div>
+                    {mandi.arrival_date && (
+                      <div className={`text-[10px] ${themeClasses.mutedText} mt-0.5`}>
+                        📅 {mandi.arrival_date}
+                      </div>
+                    )}
                   </div>
                   <div className="text-right">
                     <div className={`text-xl font-bold ${themeClasses.text}`}>₹{mandi.modal_price}</div>

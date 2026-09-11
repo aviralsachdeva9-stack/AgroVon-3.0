@@ -2,13 +2,41 @@ import React, { useState, useEffect } from 'react';
 import { 
   Search, Sun, Moon, CloudRain, Wind, ArrowRight, PlayCircle, Sprout, 
   Thermometer, Leaf, FlaskConical, ChevronRight, ShieldCheck, Globe, 
-  ChevronDown, User, MapPin, Cloud, History, Droplets, Eye 
+  ChevronDown, User, MapPin, Cloud, History, Droplets, Eye, Camera, Cpu
 } from 'lucide-react';
 import { ViewState, Product, UserProfile } from '../types';
 import { TRANSLATIONS } from '../utils/translations';
 import { fetchLiveNews, NewsItem } from '../services/newsService';
 import { fetchWeather, fetchForecast, getWeatherIcon, WeatherData, ForecastDay } from '../services/weatherService';
+import { fetchMandiByGPS, findBestMandi } from '../services/mandiService';
 import { useHardwareData } from '../hooks/useHardwareData';
+
+// Inline timeAgo — no import issues
+const timeAgo = (iso: string | undefined, lang = 'en'): string => {
+  if (!iso) return '';
+  try {
+    const diff = Date.now() - new Date(iso).getTime();
+    if (isNaN(diff) || diff < 0) return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+    const m = Math.floor(diff / 60000);
+    const h = Math.floor(diff / 3600000);
+    const d = Math.floor(diff / 86400000);
+    if (lang === 'hi') {
+      if (m < 1) return 'अभी'; if (m < 60) return `${m} मिनट पहले`;
+      if (h < 24) return `${h} घंटे पहले`; return `${d} दिन पहले`;
+    }
+    if (lang === 'pb' || lang === 'pa') {
+      if (m < 1) return 'ਹੁਣੇ'; if (m < 60) return `${m} ਮਿੰਟ ਪਹਿਲਾਂ`;
+      if (h < 24) return `${h} ਘੰਟੇ ਪਹਿਲਾਂ`; return `${d} ਦਿਨ ਪਹਿਲਾਂ`;
+    }
+    if (lang === 'te') {
+      if (m < 1) return 'ఇప్పుడే'; if (m < 60) return `${m} నిమిషాల క్రితం`;
+      if (h < 24) return `${h} గంటల క్రితం`; return `${d} రోజుల క్రితం`;
+    }
+    if (m < 1) return 'Just now'; if (m < 60) return `${m}m ago`;
+    if (h < 24) return `${h}h ago`; if (d === 1) return 'Yesterday';
+    return `${d} days ago`;
+  } catch { return ''; }
+};
 
 interface HomeViewProps {
   setView: (view: ViewState) => void;
@@ -31,39 +59,74 @@ const HomeView: React.FC<HomeViewProps> = ({
   const schemesList = TRANSLATIONS[language]?.schemes || TRANSLATIONS['en'].schemes;
 
   // --- STATE ---
-  const [soilData, setSoilData] = useState(propSoilData || { N: 45, P: 32, K: 180, moisture: 24, temp: 27 });
+  const [farmData, setFarmData] = useState<any>({ 
+    disaster_alert: "✅ Safe",
+    ai_vision: {
+      disease_detected: "Scanning...",
+      confidence: 0
+    },
+    node_1: {
+      temp: 0,
+      moisture: 0,
+      rain: "No Rain"
+    },
+    node_2: {
+      temp: 0,
+      moisture: 0,
+      rain: "No Rain"
+    }
+  });
+
+  // Fetch Farm Status
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetch('http://192.168.137.56:5000/api/farm-status')
+        .then(res => res.json())
+        .then(data => setFarmData(data))
+        .catch(err => console.log("Network Error"));
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
   const [forecast, setForecast] = useState<ForecastDay[]>([]);
   const [currentWeather, setCurrentWeather] = useState<WeatherData | null>(null);
   const [weatherLoading, setWeatherLoading] = useState(true);
   const [avatar, setAvatar] = useState<string | null>(() => localStorage.getItem('agriSmart_avatar'));
-  const [locationName, setLocationName] = useState("Noida"); 
+  const [locationName, setLocationName] = useState(
+    userProfile?.district || userProfile?.state || "New Delhi"
+  );
   const [mandiData, setMandiData] = useState<any>(null);
   const [liveNews, setLiveNews] = useState<NewsItem[]>([]);
   const [history, setHistory] = useState<any[]>([]);
 
+  // Fetch local Raspberry Pi history data
+  useEffect(() => {
+    const fetchHistory = async () => {
+      try {
+        const res = await fetch('http://192.168.137.56:5000/api/history', { signal: AbortSignal.timeout(5000) });
+        if (res.ok) {
+          const data = await res.json();
+          setHistory(data);
+        }
+      } catch (err) {
+        console.error("Local hardware history fetch error:", err);
+      }
+    };
+    fetchHistory();
+    const interval = setInterval(fetchHistory, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
   // --- HARDWARE DATA HOOK ---
   const { sensorData, isConnected, lastUpdate, error, isLoading } = useHardwareData(5000);
 
-  // Update soil data when hardware data changes
+  // Update farm data when hardware data changes (Disabled to match new API structure)
   useEffect(() => {
     if (sensorData) {
-      const newData = {
-        N: sensorData.N,
-        P: sensorData.P,
-        K: sensorData.K,
-        moisture: sensorData.moisture,
-        temp: sensorData.temp
-      };
-      setSoilData(newData);
-
-      // Sync with parent component if available
-      if (propSetSoilData) {
-        propSetSoilData(newData);
-      }
+      // Legacy hook kept for status connection tracking, but we use interval fetch above for data now
     }
-  }, [sensorData, propSetSoilData]);
+  }, [sensorData]);
 
   // Log hardware status for debugging
   useEffect(() => {
@@ -75,18 +138,28 @@ const HomeView: React.FC<HomeViewProps> = ({
     const loadWeatherData = async () => {
       setWeatherLoading(true);
       try {
-        const [weatherData, forecastData] = await Promise.all([
-          fetchWeather(locationName),
-          fetchForecast(locationName)
-        ]);
-        
+        // Fallback city: user's district → state → default
+        const fallbackCity = userProfile?.district || userProfile?.state || locationName;
+
+        // Fetch current weather first (GPS-first inside the service)
+        const weatherData = await fetchWeather(fallbackCity, language);
+
         if (weatherData) {
           setCurrentWeather(weatherData);
           setLocationName(weatherData.location);
-        }
-        
-        if (forecastData.length > 0) {
-          setForecast(forecastData);
+
+          // Pass the coords we already have so forecast doesn't re-request GPS
+          const forecastData = await fetchForecast(
+            fallbackCity,
+            language,
+            weatherData.lat,
+            weatherData.lon
+          );
+          if (forecastData.length > 0) setForecast(forecastData);
+        } else {
+          // Weather returned null — still try forecast with city name
+          const forecastData = await fetchForecast(locationName, language);
+          if (forecastData.length > 0) setForecast(forecastData);
         }
       } catch (error) {
         console.error("Weather loading error:", error);
@@ -96,18 +169,35 @@ const HomeView: React.FC<HomeViewProps> = ({
     };
 
     loadWeatherData();
-  }, [locationName]);
+  // Re-run when language or profile location changes
+  }, [language, userProfile?.district, userProfile?.state]);
 
-  // Mock Mandi Data (Keep existing)
+  // Fetch Real Mandi Data
   useEffect(() => {
-    setMandiData({ bestPrice: 2150, bestMandiName: "Dadri Mandi", percentHigher: 12 });
-  }, []);
+    const loadMandi = async () => {
+      try {
+        const result = await fetchMandiByGPS("Wheat"); // Defaulting to Wheat to show some real data
+        if (result.records && result.records.length > 0) {
+          const best = findBestMandi(result.records);
+          setMandiData(best);
+        } else {
+          setMandiData(null);
+        }
+      } catch (error) {
+        console.error("Mandi loading error in HomeView:", error);
+        setMandiData(null);
+      }
+    };
+    loadMandi();
+  }, [userProfile]);
 
   // Live News Loading
   useEffect(() => {
     const loadNews = async () => {
       try {
-        const newsData = await fetchLiveNews(language);
+        // Pass user's state for locality-filtered agri news
+        const locality = userProfile?.state || userProfile?.district || null;
+        const newsData = await fetchLiveNews(language, locality);
         setLiveNews(newsData);
       } catch (error) {
         console.error("News loading error:", error);
@@ -115,7 +205,7 @@ const HomeView: React.FC<HomeViewProps> = ({
     };
 
     loadNews();
-  }, [language]);
+  }, [language, userProfile?.state, userProfile?.district]);
 
   // Update current date
   useEffect(() => {
@@ -251,8 +341,8 @@ const HomeView: React.FC<HomeViewProps> = ({
                  <span className={`text-xs font-bold ${index === 0 ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'}`}>
                    {index === 0 ? (t.live || 'Today') : getDayName(day.date)}
                  </span>
-                 {getWeatherIconComponent(day.icon, day.condition, "w-5 h-5")}
-                 <span className="text-sm font-bold text-gray-900 dark:text-white">{day.temp}°</span>
+                 {getWeatherIconComponent(index === 0 ? (currentWeather?.icon || day.icon) : day.icon, index === 0 ? (currentWeather?.condition || day.condition) : day.condition, "w-5 h-5")}
+                 <span className="text-sm font-bold text-gray-900 dark:text-white">{index === 0 ? (currentWeather?.temp || day.temp) : day.temp}°</span>
                  <span className="text-xs text-gray-500 dark:text-gray-400">
                    {day.humidity}%
                  </span>
@@ -293,31 +383,70 @@ const HomeView: React.FC<HomeViewProps> = ({
           </div>
         </div>
 
+        {/* 🔴 LIVE AI VIDEO STREAM */}
+        <div className="w-full h-[260px] rounded-2xl overflow-hidden border-4 border-green-500 mb-4 shadow-lg relative bg-black">
+          <iframe 
+            src="http://192.168.137.56:5000/video_feed" 
+            className="w-full h-full border-0 object-cover"
+            sandbox="allow-scripts allow-same-origin"
+            title="Live Farm Stream"
+          />
+          <div className="absolute top-3 left-3 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-md animate-pulse flex items-center gap-1.5 shadow-md">
+            <div className="w-1.5 h-1.5 bg-white rounded-full"></div> LIVE
+          </div>
+        </div>
+
+        {/* 🚨 DISASTER ALERT CARD */}
+        <div className={`p-4 rounded-xl shadow-sm border mb-4 ${farmData.disaster_alert !== "✅ Safe" ? 'bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/30' : 'bg-green-50 dark:bg-green-500/10 border-green-200 dark:border-green-500/30'}`}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">Disaster Status</span>
+            <span className={`text-lg font-black ${farmData.disaster_alert !== "✅ Safe" ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>{farmData.disaster_alert}</span>
+          </div>
+        </div>
+
+        {/* 🦠 AI DISEASE DETECTION CARD */}
+        <div className="mb-4 bg-white dark:bg-[#1a2e28] p-4 rounded-xl border border-gray-100 dark:border-[#2d4a3e] shadow-sm relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-2 opacity-5"><Camera className="w-16 h-16 text-green-500" /></div>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Live Crop Vision</span>
+          </div>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Prediction</span>
+              <span className="text-sm font-black text-orange-500 dark:text-orange-400">{farmData.ai_vision.disease_detected}</span>
+            </div>
+            <div className="flex items-center justify-between mt-1">
+              <span className="text-sm font-medium text-gray-600 dark:text-gray-400">Confidence</span>
+              <span className="text-xs font-bold bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400 px-2 py-0.5 rounded-full">{farmData.ai_vision.confidence}%</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 📡 SENSOR NODES DATA */}
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-white dark:bg-[#1a2e28] p-4 rounded-2xl border border-gray-100 dark:border-[#2d4a3e] relative overflow-hidden group shadow-sm">
-            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity"><FlaskConical className="w-12 h-12 text-yellow-500" /></div>
-            <div><span className="text-2xl font-bold text-gray-900 dark:text-white">{soilData.N}</span><span className="text-xs text-gray-400 ml-1">kg/ha</span></div>
-            <div className="mt-2 text-[10px] font-bold text-yellow-600 bg-yellow-100 dark:text-yellow-400 dark:bg-yellow-500/10 px-2 py-0.5 rounded-full w-fit">{t.nitrogen}</div>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-6 h-6 rounded-lg bg-green-100 dark:bg-green-500/20 flex items-center justify-center"><Cpu className="w-3 h-3 text-green-600 dark:text-green-400" /></div>
+              <span className="text-xs font-bold text-gray-900 dark:text-white">Zone 1 (Master)</span>
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between items-center"><span className="text-[10px] text-gray-500 uppercase">Temp</span><span className="text-sm font-bold text-orange-500">{farmData.node_1.temp}°C</span></div>
+              <div className="flex justify-between items-center"><span className="text-[10px] text-gray-500 uppercase">Moisture</span><span className="text-sm font-bold text-blue-500">{farmData.node_1.moisture}%</span></div>
+              <div className="flex justify-between items-center"><span className="text-[10px] text-gray-500 uppercase">Rain Val</span><span className="text-xs font-bold text-indigo-400">{farmData.node_1.rain}</span></div>
+            </div>
           </div>
+
           <div className="bg-white dark:bg-[#1a2e28] p-4 rounded-2xl border border-gray-100 dark:border-[#2d4a3e] relative overflow-hidden group shadow-sm">
-            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity"><Sprout className="w-12 h-12 text-green-500" /></div>
-            <div><span className="text-2xl font-bold text-gray-900 dark:text-white">{soilData.P}</span><span className="text-xs text-gray-400 ml-1">kg/ha</span></div>
-            <div className="mt-2 text-[10px] font-bold text-green-600 bg-green-100 dark:text-green-400 dark:bg-green-500/10 px-2 py-0.5 rounded-full w-fit">{t.phosphorus}</div>
-          </div>
-          <div className="bg-white dark:bg-[#1a2e28] p-4 rounded-2xl border border-gray-100 dark:border-[#2d4a3e] relative overflow-hidden group shadow-sm">
-            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity"><Leaf className="w-12 h-12 text-emerald-500" /></div>
-            <div><span className="text-2xl font-bold text-gray-900 dark:text-white">{soilData.K}</span><span className="text-xs text-gray-400 ml-1">kg/ha</span></div>
-            <div className="mt-2 text-[10px] font-bold text-emerald-600 bg-emerald-100 dark:text-emerald-400 dark:bg-emerald-500/10 px-2 py-0.5 rounded-full w-fit">{t_planner.potassium || 'Potassium'}</div>
-          </div>
-          <div className="bg-white dark:bg-[#1a2e28] p-4 rounded-2xl border border-gray-100 dark:border-[#2d4a3e] relative overflow-hidden group shadow-sm">
-            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity"><Droplets className="w-12 h-12 text-blue-500" /></div>
-            <div><span className="text-2xl font-bold text-gray-900 dark:text-white">{soilData.moisture}%</span><span className="text-xs text-gray-400 ml-1">moisture</span></div>
-            <div className="mt-2 text-[10px] font-bold text-blue-600 bg-blue-100 dark:text-blue-400 dark:bg-blue-500/10 px-2 py-0.5 rounded-full w-fit">{t_planner.moisture || 'Moisture'}</div>
-          </div>
-          <div className="bg-white dark:bg-[#1a2e28] p-4 rounded-2xl border border-gray-100 dark:border-[#2d4a3e] relative overflow-hidden group shadow-sm">
-             <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity"><Thermometer className="w-12 h-12 text-orange-500" /></div>
-             <div><span className="text-2xl font-bold text-gray-900 dark:text-white">{soilData.temp}°</span><span className="text-xs text-gray-400 ml-1">C</span></div>
-             <div className="mt-2 text-[10px] font-bold text-orange-600 bg-orange-100 dark:text-orange-400 dark:bg-orange-500/10 px-2 py-0.5 rounded-full w-fit">{t_planner.temperature || 'Temp'}</div>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-6 h-6 rounded-lg bg-teal-100 dark:bg-teal-500/20 flex items-center justify-center"><Cpu className="w-3 h-3 text-teal-600 dark:text-teal-400" /></div>
+              <span className="text-xs font-bold text-gray-900 dark:text-white">Zone 2 (Slave)</span>
+            </div>
+            <div className="space-y-2">
+              <div className="flex justify-between items-center"><span className="text-[10px] text-gray-500 uppercase">Temp</span><span className="text-sm font-bold text-orange-500">{farmData.node_2.temp}°C</span></div>
+              <div className="flex justify-between items-center"><span className="text-[10px] text-gray-500 uppercase">Moisture</span><span className="text-sm font-bold text-blue-500">{farmData.node_2.moisture}%</span></div>
+              <div className="flex justify-between items-center"><span className="text-[10px] text-gray-500 uppercase">Rain Val</span><span className="text-xs font-bold text-indigo-400">{farmData.node_2.rain}</span></div>
+            </div>
           </div>
         </div>
       </div>
@@ -329,26 +458,24 @@ const HomeView: React.FC<HomeViewProps> = ({
            <History className="w-4 h-4 text-gray-400" />
         </div>
         <div className="bg-white dark:bg-[#1a2e28] border border-gray-100 dark:border-[#2d4a3e] rounded-3xl overflow-hidden shadow-sm">
-           <div className="grid grid-cols-6 gap-2 p-3 bg-gray-50 dark:bg-black/20 border-b border-gray-100 dark:border-[#2d4a3e] text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">
+           <div className="grid grid-cols-5 gap-2 p-3 bg-gray-50 dark:bg-black/20 border-b border-gray-100 dark:border-[#2d4a3e] text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">
               <div>{t.time || "Time"}</div>
-              <div>N</div>
-              <div>P</div>
-              <div>K</div>
               <div>{t.mois || "Mois."}</div>
-              <div>TEMP</div>
+              <div>S.TEMP</div>
+              <div>A.TEMP</div>
+              <div>HUM</div>
            </div>
            <div className="max-h-48 overflow-y-auto">
               {history.length === 0 ? (
                  <div className="p-4 text-center text-xs text-gray-500">Waiting for hardware data...</div>
               ) : (
                  history.slice(0, 10).map((item, index) => (
-                    <div key={index} className="grid grid-cols-6 gap-2 p-3 border-b border-gray-100 dark:border-[#2d4a3e] text-xs text-gray-900 dark:text-white text-center hover:bg-gray-50 dark:hover:bg-white/5 transition-colors">
-                       <div className="font-mono text-gray-400">{new Date(item.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
-                       <div className="font-bold text-yellow-500">{item.N}</div>
-                       <div className="font-bold text-green-500">{item.P}</div>
-                       <div className="font-bold text-gray-700 dark:text-white">{item.K}</div>
-                       <div className="font-bold text-blue-500">{item.moisture}%</div>
-                       <div className="font-bold text-orange-500">{item.temp}°C</div>
+                    <div key={index} className="grid grid-cols-5 gap-2 p-3 border-b border-gray-100 dark:border-[#2d4a3e] text-xs text-gray-900 dark:text-white text-center hover:bg-gray-50 dark:hover:bg-white/5 transition-colors">
+                       <div className="font-mono text-gray-400">{new Date(item.timestamp || Date.now()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                       <div className="font-bold text-blue-500">{item.moisture ?? '--'}%</div>
+                       <div className="font-bold text-orange-500">{item.soilTemp ?? '--'}°C</div>
+                       <div className="font-bold text-yellow-500">{item.ambientTemp ?? '--'}°C</div>
+                       <div className="font-bold text-teal-500">{item.humidity ?? '--'}%</div>
                     </div>
                  ))
               )}
@@ -364,10 +491,10 @@ const HomeView: React.FC<HomeViewProps> = ({
          </div>
          {mandiData ? (
            <div className="bg-gray-50 dark:bg-black/20 rounded-2xl p-4 border border-gray-100 dark:border-[#2d4a3e] flex justify-between items-center">
-             <div><p className="text-3xl font-bold text-green-600 dark:text-green-500">₹ {mandiData.bestPrice}</p><p className="text-xs font-bold text-gray-700 dark:text-gray-200 mt-1 uppercase tracking-wide">{mandiData.bestMandiName}</p></div>
+             <div><p className="text-3xl font-bold text-green-600 dark:text-green-500">₹ {mandiData.bestPrice}</p><p className="text-xs font-bold text-gray-700 dark:text-gray-200 mt-1 uppercase tracking-wide line-clamp-1 max-w-[120px]">{mandiData.bestMandiName}</p></div>
              <div className="text-right"><div className="bg-green-100 text-green-700 dark:bg-green-500/10 dark:text-green-400 text-xs font-bold px-3 py-1.5 rounded-full inline-block">+{mandiData.percentHigher}%</div></div>
            </div>
-         ) : <div className="text-center p-4 text-xs text-gray-500">Loading rates...</div>}
+         ) : <div className="text-center p-4 text-xs text-gray-500">Loading live rates...</div>}
       </div>
 
       {/* SCHEMES */}
@@ -418,7 +545,7 @@ const HomeView: React.FC<HomeViewProps> = ({
                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 line-clamp-2">{news.summary}</p>
                  </div>
                  <div className="flex justify-between items-center mt-2">
-                   <span className="text-xs text-gray-500 dark:text-gray-400">{news.pubDate}</span>
+                   <span className="text-xs text-green-500 dark:text-green-400 font-medium">{timeAgo(news.pubDateRaw, language)}</span>
                    <button className="p-1.5 rounded-full bg-gray-50 dark:bg-[#0d1f18] border border-gray-100 dark:border-[#2d4a3e] hover:bg-gray-100 dark:hover:bg-[#2d4a3e] transition-colors">
                      <PlayCircle className="w-4 h-4 text-gray-900 dark:text-white" />
                    </button>
