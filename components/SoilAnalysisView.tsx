@@ -114,13 +114,9 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
         <button onClick={performAnalysis} className="px-5 py-2 bg-green-600 text-white rounded-xl text-sm font-bold">Retry</button>
       </div>
     </div>
-  );  const [camTime, setCamTime] = useState(Date.now());
+  );
 
-  // Refresh Camera Feed
-  useEffect(() => {
-    const camInterval = setInterval(() => setCamTime(Date.now()), 1500); // 1.5s refresh for ESP32 capture
-    return () => clearInterval(camInterval);
-  }, []);
+  if (!analysis) return null;
 
   return (
     <div className={`flex flex-col min-h-screen ${T.bg} ${T.text} animate-fade-in pb-24`}>
@@ -141,14 +137,14 @@ const SoilAnalysisView: React.FC<SoilAnalysisViewProps> = ({ setView, isDarkMode
         {/* 🔴 LIVE AI VIDEO STREAM */}
         <div className="w-full h-[260px] rounded-2xl overflow-hidden border-4 border-green-500 shadow-lg relative bg-black flex items-center justify-center">
           <img 
-            src={`http://192.168.137.86/capture?t=${camTime}`} 
-            alt="ESP32 Live Stream"
+            src="http://192.168.137.56:5000/video_feed" 
+            alt="YOLOv8 Live Stream"
             className="w-full h-full object-cover"
             onError={(e) => { e.currentTarget.style.display = 'none'; }}
             onLoad={(e) => { e.currentTarget.style.display = 'block'; }}
           />
           <div className="absolute top-3 left-3 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-md animate-pulse flex items-center gap-1.5 shadow-md">
-            <div className="w-1.5 h-1.5 bg-white rounded-full"></div> ESP32 LIVE
+            <div className="w-1.5 h-1.5 bg-white rounded-full"></div> YOLOv8 LIVE
           </div>
         </div>
 

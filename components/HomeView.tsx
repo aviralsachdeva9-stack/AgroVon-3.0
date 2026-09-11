@@ -66,7 +66,7 @@ const HomeView: React.FC<HomeViewProps> = ({
     rain_val: "No Rain"
   });
 
-  const [camTime, setCamTime] = useState(Date.now());
+
 
   // Fetch Farm Status
   useEffect(() => {
@@ -79,11 +79,7 @@ const HomeView: React.FC<HomeViewProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  // Refresh Camera Feed
-  useEffect(() => {
-    const camInterval = setInterval(() => setCamTime(Date.now()), 1500); // 1.5s refresh for ESP32 capture
-    return () => clearInterval(camInterval);
-  }, []);
+
 
   const [currentDate, setCurrentDate] = useState(new Date());
   const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
@@ -384,14 +380,14 @@ const HomeView: React.FC<HomeViewProps> = ({
         {/* 🔴 LIVE AI VIDEO STREAM */}
         <div className="w-full h-[260px] rounded-2xl overflow-hidden border-4 border-green-500 mb-4 shadow-lg relative bg-black flex items-center justify-center">
           <img 
-            src={`http://192.168.137.86/capture?t=${camTime}`} 
-            alt="ESP32 Live Stream"
+            src="http://192.168.137.56:5000/video_feed" 
+            alt="YOLOv8 Live Stream"
             className="w-full h-full object-cover"
             onError={(e) => { e.currentTarget.style.display = 'none'; }}
             onLoad={(e) => { e.currentTarget.style.display = 'block'; }}
           />
           <div className="absolute top-3 left-3 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-md animate-pulse flex items-center gap-1.5 shadow-md">
-            <div className="w-1.5 h-1.5 bg-white rounded-full"></div> ESP32 LIVE
+            <div className="w-1.5 h-1.5 bg-white rounded-full"></div> YOLOv8 LIVE
           </div>
         </div>
 
